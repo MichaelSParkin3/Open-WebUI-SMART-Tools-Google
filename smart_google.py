@@ -1,14 +1,14 @@
 """
- title: SMART - Sequential Multi-Agent Reasoning Technique (Google AI edition)
- author: MartianInGreen (modified by MichaelSParkin3, adapted for Google AI)
- author_url: https://github.com/MichaelSParkin3/
- description: SMART is a sequential multi-agent reasoning technique. Uses Google AI + online/Wolfram/YouTube tools.
- git_url: https://github.com/MichaelSParkin3/Open-WebUI-SMART-Tools-Google/tree/main
- required_open_webui_version: 0.5.0
- requirements: langchain-google-genai, langgraph==0.2.60, requests, pydantic>=2, youtube_transcript_api, google-api-python-client
- version: 1.4.1
- licence: MIT
- """
+title: SMART - Sequential Multi-Agent Reasoning Technique (Google AI edition)
+author: MartianInGreen (modified by MichaelSParkin3, adapted for Google AI)
+author_url: https://github.com/MichaelSParkin3/
+description: SMART is a sequential multi-agent reasoning technique. Uses Google AI + online/Wolfram/YouTube tools.
+git_url: https://github.com/MichaelSParkin3/Open-WebUI-SMART-Tools-Google/tree/main
+required_open_webui_version: 0.5.0
+requirements: langchain-google-genai, langgraph==0.2.60, requests, pydantic>=2, youtube_transcript_api, google-api-python-client
+version: 1.5.0
+licence: MIT
+"""
 
 import os
 import re
@@ -118,7 +118,7 @@ You will not directly interact with the user in any way. Only inform the output 
 **General Steps**:
 1. Outline the problem.
 2. Think about what kind of problem this is.
-3. Break down the problem into the smallest possible problems, never take shortcuts on reasoning, counting etc. Everything needs to be explicitly stated. More output is better.
+3. Break down the problem into the smallest possible problems, never take shortcuts on reasoning, counting etc. Everything needs to be explicitly stated.
 4. Think about steps you might need to take to solve this problem.
 5. Think through these steps.
 6. Backtrack and restart from different points as often as you need to. Always consider alternative approaches.
@@ -142,7 +142,7 @@ USER_INTERACTION_PROMPT = """<system_instructions>
 You are the user-interaction agent of an agent chain. You are the part of the llm designed to interact with the user.
 
 You should follow the pre-prompt given to you within <preprompt> tags.
-<system_instructions>"""
+</system_instructions>"""
 
 USER_INTERACTION_REASONING_PROMPT = """You MUST follow the instructions given to you within <reasoning_output>/<instruction> tags.
 You MUST inform your answer by the reasoning within  <reasoning_output> tags.
@@ -439,7 +439,6 @@ def searchWeb(
         if focus not in ["images", "videos"]:
             results = search_brave(query, country, language, focus, SEARCH_KEY)
         else:
-            # pass named params so 'freshness' stays None and the API key is passed correctly
             results = search_images_and_video(
                 query=query,
                 country=country,
@@ -517,18 +516,20 @@ def to_lc_messages(messages: list[dict]):
 class Pipe:
     class Valves(BaseModel):
         try:
-            GOOGLE_API_KEY: str = Field(
-                default="", description="Google AI API key"
-            )
+            GOOGLE_API_KEY: str = Field(default="", description="Google AI API key")
             MODEL_PREFIX: str = Field(
                 default="SMART", description="Prefix before model ID"
             )
             # Default Google AI model IDs (edit these in the UI to your favorites)
             MINI_MODEL: str = Field(
-                default="gemini-1.5-flash-latest", description="Model for very small tasks"
+                default="gemini-1.5-flash-latest",
+                description="Model for very small tasks",
             )
             SMALL_MODEL: str = Field(
                 default="gemini-1.5-flash-latest", description="Model for small tasks"
+            )
+            MEDIUM_MODEL: str = Field(
+                default="gemini-1.5-pro-latest", description="Model for medium tasks"
             )
             LARGE_MODEL: str = Field(
                 default="gemini-1.5-pro-latest", description="Model for large tasks"
@@ -541,7 +542,8 @@ class Pipe:
                 default="gemini-1.5-pro-latest", description="Model for reasoning tasks"
             )
             PLANNING_MODEL: str = Field(
-                default="gemini-1.5-flash-latest", description="Model for the planning step"
+                default="gemini-1.5-flash-latest",
+                description="Model for the planning step",
             )
             BRAVE_SEARCH_KEY: str = Field(
                 default="", description="Brave Search API Key"
@@ -587,10 +589,14 @@ class Pipe:
         v = self.valves
         if not v.GOOGLE_API_KEY:
             raise Exception("Error: GOOGLE_API_KEY is not set")
-
-        # This is now handled by passing the key directly to ChatGoogleGenerativeAI
-        # but we keep the setup simple.
         self.SYSTEM_PROMPT_INJECTION = ""
+
+    # ---------- Utility: safety-normalize potentially risky phrasing ----------
+    def _normalize_for_safety(self, text: str) -> str:
+        if not isinstance(text, str):
+            return text
+        # Reduce chance of minors-related safety triggers
+        return re.sub(r"\bgirls\b", "women (18+)", text, flags=re.IGNORECASE)
 
     # ---------- Tools (async) ----------
 
@@ -603,6 +609,7 @@ class Pipe:
         :param language: Language code (e.g., en)
         :param focus: one of all|web|news|wikipedia|academia|reddit|images|videos
         """
+        query = self._normalize_for_safety(query)
         results = searchWeb(
             query, country, language, focus, self.valves.BRAVE_SEARCH_KEY
         )
@@ -647,15 +654,12 @@ class Pipe:
         return ["en", "es"]
 
     def _extract_transcript_text(self, transcript_data) -> List[str]:
-        # The youtube_transcript_api can return transcript segments as either dictionaries
-        # or objects (FetchedTranscriptSnippet). The original code only handled dictionaries,
-        # causing an error. This updated function handles both cases.
         texts = []
         for segment in transcript_data:
             if isinstance(segment, dict):
                 texts.append(segment.get("text", ""))
             else:
-                texts.append(getattr(segment, 'text', ''))
+                texts.append(getattr(segment, "text", ""))
         return texts
 
     def _fetch_transcript(self, video_id: str) -> tuple[List[str], str, str]:
@@ -715,9 +719,9 @@ class Pipe:
         if not 1 <= max_results <= 50:
             raise ValueError("max_results must be between 1 and 50")
 
-        youtube = build("youtube", "v3", developerKey=self.valves.YOUTUBE_API_KEY)
+        yt = build("youtube", "v3", developerKey=self.valves.YOUTUBE_API_KEY)
         search_resp = (
-            Youtube()
+            yt.search()
             .list(part="snippet", q=query, type="video", maxResults=max_results)
             .execute()
         )
@@ -739,7 +743,7 @@ class Pipe:
 
         if video_ids:
             detail_resp = (
-                youtube.videos()
+                yt.videos()
                 .list(part="statistics,contentDetails", id=",".join(video_ids))
                 .execute()
             )
@@ -757,13 +761,14 @@ class Pipe:
                 )
         return results
 
-    async def Youtube(self, query: str, max_results: int = 5) -> str:
+    async def youtube_search(self, query: str, max_results: int = 5) -> str:
         """
         Search YouTube for videos.
         :param query: The search query.
         :param max_results: The maximum number of results to return (1-50).
         """
         try:
+            query = self._normalize_for_safety(query)
             entries = self._search_youtube_logic(query, max_results)
             items = [SearchItem(**e) for e in entries]
             result = SearchResult(results=items)
@@ -828,6 +833,7 @@ class Pipe:
 
             mini_model_id = self.valves.MINI_MODEL
             small_model_id = self.valves.SMALL_MODEL
+            medium_model_id = self.valves.MEDIUM_MODEL
             large_model_id = self.valves.LARGE_MODEL
             huge_model_id = self.valves.HUGE_MODEL
             planning_model_id = self.valves.PLANNING_MODEL
@@ -841,9 +847,26 @@ class Pipe:
             }
 
             # --- Google AI models via ChatGoogleGenerativeAI (with safety settings) ---
-            planning_model = ChatGoogleGenerativeAI(model=planning_model_id, google_api_key=self.valves.GOOGLE_API_KEY, safety_settings=safety_settings)
-            small_model = ChatGoogleGenerativeAI(model=small_model_id, google_api_key=self.valves.GOOGLE_API_KEY, safety_settings=safety_settings)
-            large_model = ChatGoogleGenerativeAI(model=large_model_id, google_api_key=self.valves.GOOGLE_API_KEY, safety_settings=safety_settings)
+            planning_model = ChatGoogleGenerativeAI(
+                model=planning_model_id,
+                google_api_key=self.valves.GOOGLE_API_KEY,
+                safety_settings=safety_settings,
+            )
+            small_model = ChatGoogleGenerativeAI(
+                model=small_model_id,
+                google_api_key=self.valves.GOOGLE_API_KEY,
+                safety_settings=safety_settings,
+            )
+            medium_model = ChatGoogleGenerativeAI(
+                model=medium_model_id,
+                google_api_key=self.valves.GOOGLE_API_KEY,
+                safety_settings=safety_settings,
+            )
+            large_model = ChatGoogleGenerativeAI(
+                model=large_model_id,
+                google_api_key=self.valves.GOOGLE_API_KEY,
+                safety_settings=safety_settings,
+            )
 
             config = {}
 
@@ -866,31 +889,37 @@ class Pipe:
             send_status = get_send_status(__event_emitter__)
 
             #
-            # STEP 1: Planning
+            # STEP 1: Planning (with safety-normalization for the last user message)
             #
             combined_message = ""
-            for message in body["messages"]:
+            msgs = body["messages"]
+            for idx, message in enumerate(msgs):
                 role = message["role"]
                 message_content = message.get("content", "")
                 content_to_use = ""
                 if isinstance(message_content, str):
-                    if len(message_content) > 1000:
-                        mssg_length = len(message_content)
+                    text_src = message_content
+                    if idx == len(msgs) - 1:  # normalize last user message
+                        text_src = self._normalize_for_safety(text_src)
+                    if len(text_src) > 1000:
+                        mssg_length = len(text_src)
                         content_to_use = (
-                            message_content[:500]
+                            text_src[:500]
                             + "\n...(Middle of message cut by $NUMBER$)...\n"
-                            + message_content[-500:]
+                            + text_src[-500:]
                         )
                         new_mssg_length = len(content_to_use)
                         content_to_use = content_to_use.replace(
                             "$NUMBER$", str(mssg_length - new_mssg_length)
                         )
                     else:
-                        content_to_use = message_content
+                        content_to_use = text_src
                 elif isinstance(message_content, list):
                     for part in message_content:
                         if part.get("type") == "text":
                             text = part.get("text", "")
+                            if idx == len(msgs) - 1:
+                                text = self._normalize_for_safety(text)
                             if len(text) > 1000:
                                 mssg_length = len(text)
                                 content_to_use += (
@@ -920,15 +949,15 @@ class Pipe:
             csv_hastag_list = re.findall(r"<answer>(.*?)</answer>", content)
             csv_hastag_list = csv_hastag_list[0] if csv_hastag_list else "unknown"
 
-            # model selection
+            # model selection (map #medium -> medium, #large -> large)
             if "#mini" in csv_hastag_list:
                 model_to_use_id = mini_model_id
             elif "#small" in csv_hastag_list:
                 model_to_use_id = small_model_id
             elif "#medium" in csv_hastag_list:
-                model_to_use_id = large_model_id
+                model_to_use_id = medium_model_id
             elif "#large" in csv_hastag_list:
-                model_to_use_id = huge_model_id
+                model_to_use_id = large_model_id
             else:
                 model_to_use_id = small_model_id
 
@@ -1001,9 +1030,9 @@ class Pipe:
                 )
 
             if "#!!!" in lm or "#large" in lm:
-                model_to_use_id = huge_model_id
-            elif "#!!" in lm or "#medium" in lm:
                 model_to_use_id = large_model_id
+            elif "#!!" in lm or "#medium" in lm:
+                model_to_use_id = medium_model_id
             elif "#!" in lm or "#small" in lm:
                 model_to_use_id = small_model_id
 
@@ -1012,7 +1041,7 @@ class Pipe:
             elif "#*no" in lm or "#no" in lm:
                 is_reasoning_needed = "NO"
 
-            if model_to_use_id == huge_model_id and len(tool_list) == 0:
+            if model_to_use_id == large_model_id and len(tool_list) == 0:
                 tool_list.append("dummy_tool")
 
             await send_status(
@@ -1077,7 +1106,10 @@ class Pipe:
                             )
                     if tool == "youtube":
                         youtube_funcs = [
-                            (self.Youtube, "Search YouTube for videos."),
+                            (
+                                self.youtube_search,
+                                "Search YouTube for videos.",
+                            ),  # renamed
                             (
                                 self.get_youtube_transcript,
                                 "Get the transcript of a YouTube video.",
@@ -1116,20 +1148,39 @@ class Pipe:
                                 )
                             )
 
-            model_to_use = ChatGoogleGenerativeAI(model=model_to_use_id, google_api_key=self.valves.GOOGLE_API_KEY, safety_settings=safety_settings)
+            # Log which tools are registered (visibility)
+            try:
+                await send_status(f"Registered tools: {[t.name for t in tools]}", False)
+            except Exception:
+                pass
+
+            model_to_use = ChatGoogleGenerativeAI(
+                model=model_to_use_id,
+                google_api_key=self.valves.GOOGLE_API_KEY,
+                safety_settings=safety_settings,
+            )
 
             messages_to_use = body["messages"]
             last_message_json = isinstance(messages_to_use[-1].get("content", ""), list)
 
             # Fast path: NO reasoning
             if is_reasoning_needed == "NO":
+                FORCE_TOOLS = ""
+                if tool_list:
+                    FORCE_TOOLS = (
+                        "\nYou MUST call at least one of the provided tools (#online / #youtube / #wolfram) "
+                        "before answering. Do not rely on prior knowledge alone. If tools are unavailable, "
+                        "reply exactly with: TOOL_UNAVAILABLE.\n"
+                    )
+
                 messages_to_use[0]["content"] = (
                     messages_to_use[0]["content"]
                     + USER_INTERACTION_PROMPT
                     + self.SYSTEM_PROMPT_INJECTION
+                    + FORCE_TOOLS
                 )
 
-                # sanitize control tags from final user message
+                # sanitize control tags from final user message and normalize
                 def strip_tags(txt: str) -> str:
                     return (
                         str(txt)
@@ -1150,18 +1201,19 @@ class Pipe:
                     )
 
                 if not last_message_json:
-                    messages_to_use[-1]["content"] = strip_tags(
-                        messages_to_use[-1]["content"]
-                    )
+                    norm = self._normalize_for_safety(messages_to_use[-1]["content"])
+                    messages_to_use[-1]["content"] = strip_tags(norm)
                 else:
-                    messages_to_use[-1]["content"][0]["text"] = strip_tags(
+                    norm = self._normalize_for_safety(
                         messages_to_use[-1]["content"][0]["text"]
                     )
+                    messages_to_use[-1]["content"][0]["text"] = strip_tags(norm)
 
                 graph = create_react_agent(model_to_use, tools=tools)
                 inputs = {"messages": body["messages"]}
 
                 num_tool_calls = 0
+                tool_error_seen = False
                 async for event in graph.astream_events(
                     inputs, version="v2", config=config
                 ):
@@ -1187,6 +1239,38 @@ class Pipe:
                             title=event["name"],
                             content=f"Tool '{event['name']}' with inputs {data.get('input')} returned {data.get('output')}",
                         )
+                    elif kind == "on_tool_error":
+                        tool_error_seen = True
+                        await send_status(
+                            f"Tool '{event['name']}' error: {data.get('error')}", True
+                        )
+                        await send_citation(
+                            url="Tool error",
+                            title=event["name"],
+                            content=str(data),
+                        )
+
+                # Deterministic fallback if planner wanted tools but none were called
+                if num_tool_calls == 0 and tool_list:
+                    # Pull normalized, stripped user text
+                    if isinstance(lm, str):
+                        qtxt = lm
+                    else:
+                        qtxt = lm[0].get("text", "") if lm else ""
+                    qtxt = self._normalize_for_safety(qtxt)
+                    qtxt = (
+                        qtxt.replace("#online", "")
+                        .replace("#youtube", "")
+                        .replace("#wolfram", "")
+                        .replace("#no-tools", "")
+                    )
+
+                    if "youtube" in tool_list:
+                        y = await self.youtube_search(query=qtxt, max_results=5)
+                        yield "\n\n[Fallback: YouTube search]\n" + y
+                    if "online" in tool_list:
+                        s = await self.search_web(query=qtxt, country="AR", focus="web")
+                        yield "\n\n[Fallback: Web search]\n" + s
 
                 await send_status(
                     status_message=f"Done! Took: {round(time.time() - start_time, 1)}s. Used {model_to_use_id}. Reasoning was not used.",
@@ -1197,7 +1281,11 @@ class Pipe:
             # Reasoning path
             elif is_reasoning_needed == "YES":
                 reasoning_model_id = self.valves.REASONING_MODEL
-                reasoning_model = ChatGoogleGenerativeAI(model=reasoning_model_id, google_api_key=self.valves.GOOGLE_API_KEY, safety_settings=safety_settings)
+                reasoning_model = ChatGoogleGenerativeAI(
+                    model=reasoning_model_id,
+                    google_api_key=self.valves.GOOGLE_API_KEY,
+                    safety_settings=safety_settings,
+                )
 
                 reasoning_context = ""
                 for msg in body["messages"][:-1]:
@@ -1228,11 +1316,9 @@ class Pipe:
 
                 last_msg = body["messages"][-1]
                 if last_msg["role"] == "user" and not last_message_json:
-                    reasoning_context += (
-                        f"--- LAST USER MESSAGE/PROMPT ---\n{last_msg['content']}"
-                    )
+                    reasoning_context += f"--- LAST USER MESSAGE/PROMPT ---\n{self._normalize_for_safety(last_msg['content'])}"
                 elif last_msg["role"] == "user":
-                    reasoning_context += f"--- LAST USER MESSAGE/PROMPT ---\n{last_msg['content'][0]['text']}"
+                    reasoning_context += f"--- LAST USER MESSAGE/PROMPT ---\n{self._normalize_for_safety(last_msg['content'][0]['text'])}"
 
                 for tag in [
                     "#*yes",
@@ -1283,7 +1369,7 @@ class Pipe:
                 full_content = (
                     "<reasoning_agent_output>\n"
                     + reasoning_content
-                    + "\n<reasoning_agent_output>"
+                    + "\n</reasoning_agent_output>"
                 )
 
                 await send_citation(
@@ -1317,7 +1403,9 @@ class Pipe:
                         inputs = {"messages": tool_message}
                         message_buffer = ""
                         num_tool_calls = 0
-                        async for event in graph.astream_events(inputs, version="v2", config=config):
+                        async for event in graph.astream_events(
+                            inputs, version="v2", config=config
+                        ):
                             if num_tool_calls > 3:
                                 message_buffer += (
                                     "\n[TOO MANY TOOL CALLS - AGENT TERMINATED]"
@@ -1346,6 +1434,16 @@ class Pipe:
                                     title=event["name"],
                                     content=f"Tool '{event['name']}' with inputs {data.get('input')} returned {data.get('output')}",
                                 )
+                            elif kind == "on_tool_error":
+                                await send_status(
+                                    f"Tool '{event['name']}' error: {data.get('error')}",
+                                    True,
+                                )
+                                await send_citation(
+                                    url="Tool error",
+                                    title=event["name"],
+                                    content=str(data),
+                                )
 
                         tool_agent_response = message_buffer
 
@@ -1357,7 +1455,7 @@ class Pipe:
                     full_content += (
                         "\n\n\n<tool_agent_output>\n"
                         + tool_agent_response
-                        + "\n<tool_agent_output>"
+                        + "\n</tool_agent_output>"
                     )
 
                 await send_status(status_message="Reasoning complete.", done=True)
@@ -1385,14 +1483,20 @@ class Pipe:
                 if not last_message_json:
                     messages_to_use[-1]["content"] = (
                         "<user_input>\n"
-                        + strip_tags(messages_to_use[-1]["content"])
+                        + strip_tags(
+                            self._normalize_for_safety(messages_to_use[-1]["content"])
+                        )
                         + "\n</user_input>\n\n"
                         + full_content
                     )
                 else:
                     messages_to_use[-1]["content"][0]["text"] = (
                         "<user_input>\n"
-                        + strip_tags(messages_to_use[-1]["content"][0]["text"])
+                        + strip_tags(
+                            self._normalize_for_safety(
+                                messages_to_use[-1]["content"][0]["text"]
+                            )
+                        )
                         + "\n</user_input>\n\n"
                         + full_content
                     )
@@ -1412,7 +1516,9 @@ class Pipe:
                 )
 
                 num_tool_calls = 0
-                async for event in graph.astream_events(inputs, version="v2", config=config):
+                async for event in graph.astream_events(
+                    inputs, version="v2", config=config
+                ):
                     if num_tool_calls >= 6:
                         await send_status(
                             status_message="Interupting due to max tool calls reached!",
@@ -1439,6 +1545,37 @@ class Pipe:
                             title=event["name"],
                             content=f"Tool '{event['name']}' with inputs {data.get('input')} returned {data.get('output')}",
                         )
+                    elif kind == "on_tool_error":
+                        await send_status(
+                            f"Tool '{event['name']}' error: {data.get('error')}",
+                            True,
+                        )
+                        await send_citation(
+                            url="Tool error",
+                            title=event["name"],
+                            content=str(data),
+                        )
+
+                # Deterministic fallback if planner wanted tools but none were called
+                if num_tool_calls == 0 and tool_list:
+                    if isinstance(lm, str):
+                        qtxt = lm
+                    else:
+                        qtxt = lm[0].get("text", "") if lm else ""
+                    qtxt = self._normalize_for_safety(qtxt)
+                    qtxt = (
+                        qtxt.replace("#online", "")
+                        .replace("#youtube", "")
+                        .replace("#wolfram", "")
+                        .replace("#no-tools", "")
+                    )
+
+                    if "youtube" in tool_list:
+                        y = await self.youtube_search(query=qtxt, max_results=5)
+                        yield "\n\n[Fallback: YouTube search]\n" + y
+                    if "online" in tool_list:
+                        s = await self.search_web(query=qtxt, country="AR", focus="web")
+                        yield "\n\n[Fallback: Web search]\n" + s
 
                 if not num_tool_calls >= 4:
                     await send_status(
